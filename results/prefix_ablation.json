@@ -1,0 +1,14 @@
+{
+  "with_prefix": {
+    "recall@5": 0.755,
+    "mrr@10": 0.4949166666666666,
+    "n_chunks": 10130,
+    "n_eval_queries": 200
+  },
+  "without_prefix": {
+    "recall@5": 0.75,
+    "mrr@10": 0.46358333333333335,
+    "n_chunks": 10130,
+    "n_eval_queries": 200
+  }
+}

@@ -1,0 +1,11 @@
+sentence-transformers
+chromadb
+pydantic>=2
+pytest
+numpy
+requests
+python-dotenv
+groq
+pyarrow
+pandas
+matplotlib
