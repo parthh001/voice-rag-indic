@@ -1,5 +1,8 @@
-from src.contracts import GuardrailVerdict, CheckResult
+import uuid
+
+from src.contracts import Chunk, CheckResult, GuardrailVerdict
 from src.pipeline import _validate_query_text, run_pipeline
+from src.store import VectorStore
 
 
 def test_validate_rejects_empty_string():
@@ -23,12 +26,33 @@ def test_validate_passes_real_query():
     assert result.passed is True
 
 
-def test_run_pipeline_nulls_answer_when_post_guardrail_fails(monkeypatch):
+def test_run_pipeline_nulls_answer_when_post_guardrail_fails(monkeypatch, tmp_path):
     """Regression test: a failed post-generation guardrail verdict (invented
     citation, ungrounded sentence) must null the returned answer, matching
     the contract's own invariant ("answer: Answer | None  # None when
     guardrails reject"). Previously the pipeline returned the rejected
-    answer anyway, silently defeating the guardrail."""
+    answer anyway, silently defeating the guardrail.
+
+    Fully self-contained (no dependency on data/subset/, which only exists
+    after running src.data.loader locally and is gitignored) -- CI caught
+    exactly this: the original version of this test called the real
+    _ensure_pipeline_index, which needs the downloaded dataset CI doesn't
+    have. A small synthetic in-memory index is built instead."""
+    chroma_path = tmp_path / ".chroma_test_pipeline"
+    collection_name = f"test_pipeline_{uuid.uuid4().hex[:8]}"
+    store = VectorStore(collection_name, persist_path=chroma_path, reset=True)
+    store.index(
+        [
+            Chunk(
+                chunk_id="fixed:doc1:0",
+                text="A corporation is a legal entity separate from its owners.",
+                doc_id="doc1",
+                strategy="fixed",
+            )
+        ]
+    )
+    monkeypatch.setattr("src.pipeline._ensure_pipeline_index", lambda strategy: store)
+
     passing_verdict = GuardrailVerdict(passed=True, checks=[])
     failing_verdict = GuardrailVerdict(
         passed=False,
