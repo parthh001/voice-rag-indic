@@ -1,5 +1,8 @@
 # Voice-Enabled RAG over Indic MS MARCO
 
+[![tests](https://github.com/parthh001/voice-rag-indic/actions/workflows/tests.yml/badge.svg)](https://github.com/parthh001/voice-rag-indic/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A voice-enabled RAG system over the [MSMARCO-XI](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI) dataset: **voice input → speech-to-text → chunking/retrieval → answer generation**, with three chunking strategies compared head-to-head using real relevance labels, a guardrail layer with a measured (not asserted) precision/recall, and a per-stage latency breakdown that treats the brief's 200ms target honestly instead of gaming it.
 
 Built as a portfolio-grade implementation of HH Goa 2026 Shortlisting Task 2, after the original submission deadline — the optimization target here is correctness, measurability, and honest engineering analysis, not speed of delivery. See `VOICE_RAG_BUILD_PLAN.md` for the full specification and reconnaissance this was built against.
