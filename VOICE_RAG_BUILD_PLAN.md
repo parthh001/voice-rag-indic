@@ -8,7 +8,7 @@
 
 ## 1. Context
 
-This implements **HH Goa 2026 Shortlisting Task 2: Voice-Enabled RAG Model**. The original submission deadline (22 Aug 2026) has passed, so this is now a **portfolio-grade build**, not a rushed hackathon submission. The optimization target is therefore different: correctness, measurability, and honest engineering analysis matter more than speed of delivery. The finished repo should survive a skeptical senior engineer reading it in an interview.
+This is a voice-enabled RAG system over Indic MS MARCO, built as a portfolio project rather than a rushed submission. The goal is correctness, measurability, and honest engineering analysis over speed of delivery. The finished repo should survive a skeptical senior engineer reading it in an interview.
 
 ### Original task requirements (verbatim from the brief)
 

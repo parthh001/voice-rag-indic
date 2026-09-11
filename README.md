@@ -3,9 +3,9 @@
 [![tests](https://github.com/parthh001/voice-rag-indic/actions/workflows/tests.yml/badge.svg)](https://github.com/parthh001/voice-rag-indic/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A voice-enabled RAG system over the [MSMARCO-XI](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI) dataset: **voice input → speech-to-text → chunking/retrieval → answer generation**, with three chunking strategies compared head-to-head using real relevance labels, a guardrail layer with a measured (not asserted) precision/recall, and a per-stage latency breakdown that treats the brief's 200ms target honestly instead of gaming it.
+A voice-enabled RAG system built on the [MSMARCO-XI](https://huggingface.co/datasets/ai4bharat/MSMARCO-XI) dataset: **voice in → speech-to-text → retrieval → answer out**. Three chunking strategies are compared head-to-head using real relevance labels, the guardrails have a measured precision/recall (not just a claim that they exist), and the latency numbers are broken down stage by stage instead of one convenient headline figure.
 
-Built as a portfolio-grade implementation of HH Goa 2026 Shortlisting Task 2, after the original submission deadline — the optimization target here is correctness, measurability, and honest engineering analysis, not speed of delivery. See `VOICE_RAG_BUILD_PLAN.md` for the full specification and reconnaissance this was built against.
+The goal here was correctness and honest measurement over speed — every claim below is backed by a number in `results/`, and every limitation is written down rather than left out. See `VOICE_RAG_BUILD_PLAN.md` for the full spec and dataset notes this was built against.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ Built as a portfolio-grade implementation of HH Goa 2026 Shortlisting Task 2, af
 | Validation | pydantic v2 | typed contracts at every module boundary (`src/contracts.py`) |
 | Tests | pytest | 49 tests, all pass with zero API keys present |
 
-Ground truth for every retrieval metric below comes from `passages.is_selected` in the dataset itself — real human relevance labels, not synthetic judgments.
+Every retrieval number below is checked against `passages.is_selected` in the dataset itself — real human relevance labels, not something I made up.
 
 ## Setup
 
@@ -40,17 +40,17 @@ cd voice-rag-indic
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in SARVAM_API_KEY / GROQ_API_KEY if you have them; mock works with none
+cp .env.example .env   # add SARVAM_API_KEY / GROQ_API_KEY if you have them; mock works with none
 
 python -m src.data.loader --lang hin --n 1000        # build the subset (one-time, ~440MB download, ~90s)
 ```
 
-Demo commands:
+Try it out:
 
 ```bash
-python -m src.pipeline --query "कॉर्पोरेशन क्या है?"     # text-only path, mock providers by default
+python -m src.pipeline --query "कॉर्पोरेशन क्या है?"     # text-only, mock providers by default
 python -m src.pipeline --audio samples/question.wav      # full voice → answer (needs SARVAM_API_KEY for real STT)
-python benchmarks/chunking_comparison.py                 # the centerpiece: Recall@k / MRR, ~10-15 min
+python benchmarks/chunking_comparison.py                 # the main benchmark: Recall@k / MRR, ~10-15 min
 python benchmarks/prefix_ablation.py                      # e5 query:/passage: prefix ablation
 python benchmarks/guardrail_eval.py                       # guardrail precision/recall
 python benchmarks/latency_benchmark.py --n 30             # P50/P70/P100 per stage
@@ -58,11 +58,11 @@ python benchmarks/plot_results.py                          # regenerate the READ
 pytest -v                                                  # full suite, no API keys needed
 ```
 
-`STT_PROVIDER` and `LLM_PROVIDER` default to `mock` (see `.env.example`) — every command above works out of the box with zero API keys. Set them to `sarvam` / `groq` once you have keys to exercise the real paths.
+`STT_PROVIDER` and `LLM_PROVIDER` default to `mock`, so everything above runs out of the box with zero API keys. Set them to `sarvam` / `groq` once you have keys to try the real thing.
 
-## Chunking comparison — the centerpiece
+## Chunking comparison — the main event
 
-Three strategies (`src/chunking/{fixed,semantic,metadata_aware}.py`) compared across three corpus modes on **1,000 real eval queries** against **9,952 corpus passages**, all from the same MSMARCO-XI Hindi validation subset. Full table and query-type stratification in [`results/chunking_comparison.md`](results/chunking_comparison.md).
+Three strategies (`src/chunking/{fixed,semantic,metadata_aware}.py`) tested across three corpus modes on **1,000 real queries** against **9,952 passages**, all from the same MSMARCO-XI Hindi validation subset. Full breakdown in [`results/chunking_comparison.md`](results/chunking_comparison.md).
 
 ![Chunking strategy comparison](results/chunking_comparison.png)
 
@@ -78,56 +78,56 @@ Three strategies (`src/chunking/{fixed,semantic,metadata_aware}.py`) compared ac
 | metadata_aware | hi→en | 11,666 | 0.235 | 0.454 | 0.563 | 0.657 | 0.367 |
 | metadata_aware | en→en | 11,666 | 0.447 | 0.801 | 0.905 | 0.960 | 0.637 |
 
-**Honest finding: the fixed baseline wins.** `fixed` matches or beats both `semantic` and `metadata_aware` on every metric in every corpus mode, and the gap widens on cross-lingual retrieval (hi→en), where `semantic` is clearly worst (R@5 = 0.507 vs 0.650 for fixed). This is not the result a demo optimized for a nice story would show — it's what 1,000 real queries against real relevance labels actually produced, and it's reported as such rather than reframed.
+**The simple approach wins.** Plain fixed-size chunking matches or beats the fancier semantic and metadata-aware strategies on every single metric, and the gap gets bigger on cross-lingual queries (semantic drops to R@5 = 0.507 vs. 0.650 for fixed). That's not the result you'd pick if you wanted a good story — it's just what 1,000 real queries against real answers actually showed, so that's what's reported.
 
-Two candidate explanations, neither confirmed: (1) MS MARCO passages are already short (single retrieved snippets, not long documents), so there is little topic drift within a passage for semantic/metadata-aware chunking to exploit — the "vast chunking strategy" premise assumes longer source documents than this dataset actually contains; (2) `semantic` and `metadata_aware` both produce *more* chunks than `fixed` (13-14k vs 10k), which should if anything help recall (more shots at a hit) yet still underperforms — suggesting the extra chunk boundaries are splitting passages in ways that hurt embedding quality for short text, not helping it. This is exactly the kind of finding the plan asked to surface rather than hide (§7 Phase 4 gotcha: report chunk counts alongside recall, don't declare a winner from resemblance alone).
+Two guesses at why, neither confirmed: MS MARCO passages are already short, so there isn't much topic drift within one passage for semantic chunking to catch — the whole idea of "smart chunking helps" assumes longer documents than this dataset has. Also, semantic and metadata-aware both produce *more* chunks than fixed (13-14k vs. 10k), which should help recall if anything, and it still doesn't — suggesting the extra splits are hurting embedding quality on short text, not helping it.
 
-Cross-lingual retrieval (hi→en: a Hindi query against an English-only corpus) works substantially worse than either monolingual mode across all three strategies — a genuine, measured limitation of `multilingual-e5-small` at this size, not a bug in the retrieval code.
+Cross-lingual retrieval (asking in Hindi, searching English passages) is noticeably worse than either same-language mode, across all three strategies — a real limit of this embedding model at this size, not a bug.
 
-### e5 prefix ablation (section 4.1)
+### e5 prefix ablation
 
-`multilingual-e5-small` is trained with mandatory `"query: "` / `"passage: "` prefixes. Measured on 200 eval queries (fixed chunker, hi→hi): full table in [`results/prefix_ablation.md`](results/prefix_ablation.md).
+`multilingual-e5-small` needs a `"query: "` / `"passage: "` prefix on every input to work properly. Tested on 200 queries (fixed chunker, hi→hi): full numbers in [`results/prefix_ablation.md`](results/prefix_ablation.md).
 
 | Variant | Recall@5 | MRR@10 |
 |---|---|---|
 | With prefixes | 0.755 | 0.495 |
 | Without prefixes | 0.750 | 0.464 |
 
-The Recall@5 delta (+0.005) is within noise at this sample size — not a dramatic effect on this particular slice — though MRR@10 shows a more consistent gap (+0.031) favoring the documented prefix convention. Prefixes are used everywhere in this project regardless, per the model card.
+The Recall@5 difference is too small to mean much at this sample size, though MRR@10 shows a more consistent gap in favor of using the prefixes. They're used everywhere in this project regardless, since that's how the model was trained.
 
 ## Guardrails
 
-Four checks (`src/guardrails.py`): inappropriate-input (keyword blocklist), off-topic (retrieval-score threshold, escalatable to an LLM judge), grounding verification (citations must exist in the retrieved set), hallucination detection (sentence-level embedding similarity against retrieved chunks). Evaluated against a hand-labelled 40-query set spanning on-topic / off-topic / unsafe / unanswerable-from-corpus. Full results and per-query scores in [`results/guardrail_eval.md`](results/guardrail_eval.md).
+Four checks (`src/guardrails.py`): is the input inappropriate (keyword list), is the question off-topic (retrieval score, can escalate to an LLM), do the citations actually exist in what was retrieved, and does the answer actually match the retrieved text (embedding similarity). Tested against 40 hand-labelled questions covering on-topic, off-topic, unsafe, and unanswerable cases. Full results in [`results/guardrail_eval.md`](results/guardrail_eval.md).
 
 ![Guardrail cheap check vs LLM judge](results/guardrail_comparison.png)
 
 | Metric | Value |
 |---|---|
-| Precision (of blocked queries, how many should've been) | 1.000 |
-| Recall (of queries that should be blocked, how many were caught) | 0.300 |
+| Precision (of blocked questions, how many should've been) | 1.000 |
+| Recall (of questions that should be blocked, how many were caught) | 0.300 |
 | on_topic accuracy | 20/20 |
 | off_topic accuracy | 0/9 |
 | unsafe accuracy | 6/7 |
 | unanswerable accuracy | 0/4 |
 
-**Honest finding, not a hand-wave: the retrieval-score off-topic check does not discriminate on this corpus.** on_topic scores range 0.791–0.902; off_topic/unanswerable scores range 0.787–0.859 — these ranges almost completely overlap. No threshold would separate them without also blocking a similar fraction of legitimate queries, because MSMARCO-XI's validation corpus spans law, finance, government, geography, and science broadly enough that e5-small finds *some* semantically adjacent passage for nearly any well-formed question, on-topic or not. This is a property of the (corpus, embedding model) pair, not a code bug.
+**The off-topic check doesn't actually work well on this corpus.** On-topic questions score 0.791–0.902; off-topic ones score 0.787–0.859 — nearly the same range. No cutoff point would separate them without also blocking a lot of legitimate questions, because this dataset covers law, finance, government, geography, and science broadly enough that the embedding model finds *something* close to almost any question, related or not. That's a property of this particular dataset and model, not a code bug.
 
-**A second, deeper finding from actually wiring in a real LLM judge:** `check_off_topic` accepts an `llm_judge` callback for exactly this reason, and re-running the eval with a real Groq call wired in produced *identical* results to the cheap-check-only run — because the 0.75 threshold sits below every observed score on this corpus, the cheap check always short-circuits to `passed=True` before the judge is ever consulted. The escalation path is correctly implemented but **unreachable in the current configuration**, not because the judge doesn't work but because its trigger condition never fires. Calling the judge directly (bypassing the unreachable trigger) to measure whether it actually helps:
+**A deeper check turned up something else.** The off-topic function can escalate to a real LLM for a second opinion, but wiring in a real Groq call and re-running the test gave *identical* results — because the score cutoff is set low enough that the cheap check always says "fine" before the LLM ever gets asked. The escalation path works, it's just never triggered. Calling the LLM directly (skipping the broken trigger) to see if it actually helps:
 
 | | Precision | Recall | Accuracy | off_topic | unanswerable | on_topic |
 |---|---|---|---|---|---|---|
-| cheap checks only (as wired) | 1.000 | 0.300 | 0.650 | 0/9 | 0/4 | 20/20 |
-| LLM judge, standalone | 1.000 | 0.750 | 0.875 | 6/9 | 2/4 | 20/20 |
+| cheap check only (as currently wired) | 1.000 | 0.300 | 0.650 | 0/9 | 0/4 | 20/20 |
+| LLM judge, called directly | 1.000 | 0.750 | 0.875 | 6/9 | 2/4 | 20/20 |
 
-A real, substantial improvement (+0.450 recall) with zero false blocks of legitimate queries — but getting there took a second bug fix: the judge's first run scored recall=1.000/on_topic=0/20 (blocking *everything*), which looked like real model behavior but turned out to be `max_tokens=5` silently truncating `openai/gpt-oss-20b`'s response to empty content before any visible answer (it's a reasoning model that spends tokens internally before emitting output) — confirmed via direct inspection of `finish_reason: "length"`, not assumed. Fixed by raising the budget to 300 tokens. **This escalation path is not wired into `src/pipeline.py`** — every real query would need an extra ~1-9s Groq call (see Latency below) to reach it, a real cost/latency tradeoff not made silently here; see Known Limitations.
+A real improvement (+0.450 recall) with zero legitimate questions wrongly blocked. Getting a clean read on this took fixing one more bug first: the LLM's first test run blocked *everything*, which looked like a real opinion but was actually `max_tokens=5` cutting off the model's response before it could answer (it's a reasoning model that uses tokens thinking before it replies) — confirmed by checking the raw response, not guessed. Raising the token limit fixed it. **This escalation isn't turned on in the live pipeline** — every real question would need an extra ~1-9 second LLM call to use it, and that's a real cost/speed tradeoff worth making on purpose, not silently.
 
-The `inappropriate_input` keyword check performed well in isolation (6/7 unsafe queries caught) but missed "Explain how to hotwire a car" — not on the blocklist, a real and disclosed gap in a substring-match approach.
+The keyword-based unsafe-content check did well on its own (6/7 caught) but missed "Explain how to hotwire a car" since that phrase isn't on the list — a real, disclosed gap in a simple keyword approach.
 
-## Latency — the 200ms target, measured honestly
+## Latency — the 200ms target, honestly measured
 
-The brief's "under 200ms" target is not achievable for the full voice→answer pipeline with hosted APIs, and no honest implementation will hit it — see `VOICE_RAG_BUILD_PLAN.md` §3 for the stage-by-stage floor (STT 300–1500ms, LLM generation 400–3000ms on hosted APIs alone). Full tables in [`results/latency.md`](results/latency.md).
+Hitting 200ms for the *whole* voice-to-answer pipeline isn't realistic once you're calling hosted APIs — see `VOICE_RAG_BUILD_PLAN.md` §3 for why. Full numbers in [`results/latency.md`](results/latency.md).
 
-Measured, both modes, 29 warm queries + 1 cold start excluded from the pool each, `numpy.percentile(..., method="nearest")`:
+Measured over 29 warm queries (first query excluded as cold start), both with mock providers and with a real Groq call:
 
 **Mock (STT=mock, LLM=mock)** — cold start 7,343ms:
 
@@ -150,22 +150,22 @@ Measured, both modes, 29 warm queries + 1 cold start excluded from the pool each
 | generate (real Groq) | 5,251.4 | 7,849.0 | 8,915.9 |
 | guardrail_post | 87.7 | 94.3 | 113.1 |
 
-Real Groq generation (P50=5.3s, P100=9.0s) landed well above the build plan's own §3 estimate of 400–3000ms for hosted LLM decode — a genuine correction to that earlier hypothesis, not a number picked to match it. Real Sarvam STT latency is still **not measured**: it was verified to work correctly (see Testing/Known Limitations), but with no real recorded speech available, every real-STT call would return an empty transcript that short-circuits at the `validate` stage before reaching `retrieve`/`generate` — timing that would be meaningless, not honest, so it isn't reported.
+The real Groq generation time (5.3s median) came in much higher than the plan's original estimate of 400–3000ms — a real correction to that guess, not a number picked to look good. Real Sarvam speech-to-text speed wasn't measured, since there's no real recorded question to test it with — a synthetic tone always returns an empty transcript, so timing that would be meaningless.
 
-**What this proves and what it doesn't.** Query embedding + vector retrieval over a ~10k-chunk corpus genuinely lands sub-200ms (mock mode P50=8.1ms, P100=10.5ms; real-generation mode P50=12.2ms, P100=16.2ms) — this is the part of the pipeline the 200ms target most plausibly refers to, and it's a defensible claim because it's measured. `guardrail_post` (hallucination detection, a second embedding pass over the answer's sentences) is the largest mock-mode cost at ~24-33ms but is dwarfed by real generation once a real LLM call is in the loop. **Real LLM generation alone (P50=5.3s) is ~400-700x the entire mock end-to-end pipeline** — this is the actual, measured reason the full voice→answer pipeline cannot hit 200ms with hosted APIs, not a hypothetical. Real Sarvam STT latency remains genuinely not measured (see above) — reported as such, not estimated.
+**What actually is fast:** turning a question into a search and getting results back takes about 8-16ms, even with a real LLM in the loop — genuinely well under 200ms, and this is probably the part the 200ms target is really about. Everything after that (the actual answer generation) is 400-700x slower once a real hosted LLM is involved, and that's the honest reason the full pipeline can't hit 200ms — not a guess, a measurement.
 
-**What it would take to get real STT+LLM closer to 200ms end-to-end:** a local quantized STT model (whisper.cpp tiny/base) instead of a network round trip; a small local generator instead of a hosted API; a streaming-first design measuring time-to-first-token rather than time-to-full-answer (the 5.3s P50 above is time-to-*full-answer*; time-to-first-token would be substantially lower but was not separately measured here); aggressive caching for repeated queries. These are estimates, explicitly labelled as such, not measurements.
+**What it would actually take:** a small model running locally instead of a hosted API, for both speech-to-text and generation, plus measuring time-to-first-word instead of time-to-full-answer, plus caching repeated questions. These are estimates, not something tested here.
 
-## Demo UI
+## Try it in a browser
 
-A local Streamlit UI (`demo_app.py`) calls the real pipeline — not a mockup — with live retrieval, guardrail checks, and generation visible per query:
+A small local Streamlit app (`demo_app.py`) runs the real pipeline — not a mockup — and shows retrieval, guardrail checks, and the generated answer for each question you ask:
 
 ```bash
 pip install -r requirements-demo.txt
 streamlit run demo_app.py
 ```
 
-Pick a chunking strategy, k, and STT/LLM provider (real providers only appear in the dropdown if the corresponding API key is set in `.env`) in the sidebar; ask a question by text or upload a `.wav`. Retrieved chunks, every guardrail check's pass/fail and detail, the answer with citations and its real grounding score, and a per-stage latency chart are all shown for that specific run — for the rigorous, aggregated numbers, see the benchmark results above instead.
+Pick a chunking strategy and provider in the sidebar (real STT/LLM options only show up if you've added the matching key to `.env`), then type a question or upload a `.wav`. You'll see the retrieved passages, each guardrail's pass/fail with detail, the answer with citations and its grounding score, and a timing chart for that run. For the real aggregated numbers, use the benchmark results above instead.
 
 ## Testing
 
@@ -173,37 +173,33 @@ Pick a chunking strategy, k, and STT/LLM provider (real providers only appear in
 pytest -v
 ```
 
-49 tests, all passing, **zero API keys required** — `.github/workflows/tests.yml` runs this exact suite in CI with no `SARVAM_API_KEY`/`GROQ_API_KEY` in the environment, proving the mock-provider path genuinely works standalone rather than merely being claimed to. Covers: contract validation (`test_contracts.py`), all three chunkers including the semantic chunker's real-embedding topic-shift split (`test_chunking.py`), vector retrieval (`test_retrieval.py`), all four guardrail checks (`test_guardrails.py`), the harness's retry/backoff/typed-error behavior against a fake flaky provider (`test_harness.py`), the pipeline's empty-query validation gate (`test_pipeline.py`), and citation-parsing robustness against real observed LLM output quirks (`test_generation.py`).
+49 tests, all passing, **no API keys needed** — CI runs this exact suite with no keys in the environment, so the mock-provider path is proven to work on its own rather than just assumed to. Covers the data contracts, all three chunkers (including proving the semantic chunker actually uses embeddings to split text, not just sentence length), retrieval, all four guardrail checks, the retry/backoff logic, the pipeline's empty-question handling, and citation parsing against real quirks a live LLM produced.
 
-Separately from the pytest suite (which stays keyless by design), the real `SarvamSTT` and `GroqLLM` providers were exercised live against the actual APIs once keys became available mid-build — see Known Limitations for exactly what that did and didn't cover.
+Separately from the test suite (which stays keyless on purpose), the real Sarvam and Groq providers were tested against the live APIs once keys became available — see below for what that did and didn't cover.
 
-## What live API keys actually verified (and what they didn't)
+## What testing with real API keys found
 
-Both `SARVAM_API_KEY` and `GROQ_API_KEY` became available mid-build and were used to test the real provider paths, not just code-review them. Three real bugs surfaced this way and were fixed, each with a regression test or a re-run confirming the fix:
+Once real Sarvam and Groq keys were available, I tested the actual providers, not just reviewed the code. That turned up six real bugs, each one fixed and verified:
 
-1. **Sarvam's `saarika:v2` STT model is deprecated server-side.** The live API returned HTTP 400 with an explicit "use `saaras:v3` instead" message. Fixed in `src/stt.py`; re-verified live — `SarvamSTT` now correctly transcribes (tested against a synthetic tone, since no real speech recording exists in this repo; empty transcript on non-speech audio is the expected, correct result).
-2. **The harness's retry/typed-error classification was never actually wired into the real provider error paths.** A live Groq 404 (see #3) surfaced as a raw, uncaught stack trace instead of a classified `TransientError`/`FatalError` — the retry logic was only ever tested against a synthetic flaky provider (`test_harness.py`), not connected to real API errors. Fixed: `src/stt.py`/`src/generation.py` now classify real HTTP/SDK errors (429 and 5xx → retryable `TransientError`; 401/400/404/missing-key → non-retryable `FatalError`) and raise the harness's typed errors directly.
-3. **The hardcoded Groq model (`llama-3.1-8b-instant`) no longer exists in the live catalog.** Confirmed via `GET /openai/v1/models`, not guessed — Groq's catalog has shifted away from Llama entirely. Swapped to `openai/gpt-oss-20b`, confirmed present and working live.
-4. **The architecture diagram's "validate" stage was missing from `src/pipeline.py`.** Live-testing real Sarvam STT against non-speech audio produced an empty transcript that silently proceeded through retrieval and generation into a nonsense answer, instead of being rejected. Fixed: added `_validate_query_text` between STT and retrieval, with a regression test (`test_pipeline.py`).
-5. **LLM citation parsing broke three different ways across real Groq calls**, none of them the same failure twice: truncating the multi-colon `chunk_id`, using fullwidth `【】` brackets instead of ASCII, and echoing the prompt's `[doc_id: X]` label verbatim instead of just `X`. Fixed by citing on the simpler colon-free `doc_id` with a bare passage header (nothing bracketed to imitate), widening the citation regex to accept both bracket styles, and defensively stripping a leading label if one still appears — regression-tested in `test_generation.py`. Confirmed working on two independent live queries after the fix, with real, correctly-resolved citations.
-6. **The `llm_judge` escalation path for the off-topic guardrail check is correctly implemented but unreachable as configured** — the 0.75 threshold sits below every observed retrieval score on this corpus, so `check_off_topic` always short-circuits before consulting the judge. Measuring the judge standalone (bypassing the unreachable trigger) showed a real +0.450 recall improvement over the cheap check alone (see Guardrails above) — a genuine, substantial finding, but one that also required fixing a second bug first: the judge's first run showed 0/20 on-topic accuracy, which turned out to be `max_tokens=5` truncating `openai/gpt-oss-20b`'s (a reasoning model) response to empty content before any visible answer, not real model disagreement.
+1. **Sarvam's `saarika:v2` speech model is discontinued.** The live API returned an error naming the replacement (`saaras:v3`). Fixed and re-tested live.
+2. **Retry logic wasn't actually connected to real errors.** A real Groq error crashed with a raw stack trace instead of being caught and retried — the retry code had only ever been tested against a fake provider, never a real one. Fixed so real errors get properly classified as "retry this" or "don't bother."
+3. **The Groq model I'd hardcoded doesn't exist anymore.** Confirmed by checking the live model list, not guessed. Swapped to a model that's actually available.
+4. **A missing validation step let empty transcripts through.** Testing real speech-to-text against non-speech audio returned an empty transcript that then produced a nonsense answer instead of being rejected. Added the missing check, with a test to catch it happening again.
+5. **Citations broke three different ways across real LLM calls** — a long ID getting cut short, unusual bracket characters, and the model echoing back a label instead of just the value. Fixed by using a simpler ID format and making the parsing more forgiving, tested against all three failure modes.
+6. **The LLM-judge safety net exists but never actually turns on** — see Guardrails above. Measuring it directly showed a real +0.450 recall improvement, but that took fixing a second bug (a too-small token limit that silently blocked every answer) to measure properly.
 
-**What this did NOT verify:** real Sarvam STT was never tested against actual human speech (no recorded `.wav` sample exists in this repo — only a synthetic sine-tone test file); the `llm_judge` escalation, while measured standalone, is not wired into `src/pipeline.py`'s actual guardrail call (doing so would add a real ~1-9s Groq call to every single query, a latency/cost tradeoff not made silently here); and neither key's rate limits, quota behavior, or failure modes under sustained load were tested — only individual, low-volume calls.
+**What this didn't cover:** real speech-to-text was never tested against an actual human voice recording, since none exists in this repo. The LLM-judge safety net is measured but not turned on by default. And neither API key was tested under heavy or sustained use — just individual calls during development.
 
-## Known Limitations
+## Known limitations
 
-- **Subset size: 1,000 of 97,941 Hindi validation queries (~1%).** All chunking-comparison and guardrail numbers are measured against this 1,000-query / 9,952-passage subset (`data/subset/`, built by `src/data/loader.py`), not the full validation split. The `query_type` distribution in this subset (72.8% DESCRIPTION, 20.0% NUMERIC, 4.2% ENTITY, 2.5% PERSON, 0.5% LOCATION) differs somewhat from the full dataset's distribution reported in `VOICE_RAG_BUILD_PLAN.md` §2.7, since the subset takes the first 1,000 surviving (gold-labelled) rows rather than a random sample.
-- **Real Sarvam STT was verified against the live API but never against real human speech** — see above. `--audio` accepts any `.wav` path; the mock STT provider works on a nonexistent path (for CI/tests).
-- **The `llm_judge` off-topic escalation is measured but not shipped in the live pipeline** — see above. Recall on off_topic/unanswerable categories stays weak (0.300) in `src/pipeline.py`'s actual behavior today; the +0.450 improvement is real but requires a deliberate architecture change (lower the threshold, or always escalate) that trades latency/cost for it.
-- **`intfloat/multilingual-e5-small` was chosen without an exhaustive embedding-model comparison.** It was selected for its size/speed/multilingual-coverage tradeoff (384-dim, ~120MB, CPU-fast) per `VOICE_RAG_BUILD_PLAN.md` §4, not benchmarked here against alternatives like `bge-m3` (larger, likely stronger, much slower) or `paraphrase-multilingual-MiniLM-L12-v2` (faster, weaker on Indic languages). The prefix ablation above is the only controlled embedding-model experiment actually run.
-- **Only Hindi was verified end to end.** The dataset ships 14 languages; only `hin` was downloaded, subsetted, and benchmarked. The loader (`src/data/loader.py --lang <code>`) supports other language codes in principle but none were run.
-- **Python 3.14.5 was used for local development**, not the 3.11 the original plan specified — no 3.11 interpreter was available in the build environment and nothing in the dependency stack requires it specifically. CI (`.github/workflows/tests.yml`) pins 3.11.
-- **The `inappropriate_input` check is a small hardcoded keyword blocklist** (`src/guardrails.py`), not a trained moderation model — it will miss unsafe queries phrased without a blocklisted substring (one such miss is documented in the guardrail eval above) and is not a substitute for a real content-moderation system in production.
-- **Neither API key's rate limits or behavior under sustained/concurrent load were tested** — only individual, low-volume live calls during development.
-
-## Independent verification
-
-`VOICE_RAG_BUILD_PLAN.md` §10 defines an audit prompt for a fresh, context-free session to re-verify every claim in this README against the actual repository state (re-running benchmarks rather than trusting `results/*.md`, checking git history for leaked secrets, adversarially testing guardrails) — not yet run against this build.
+- **Only 1,000 of 97,941 Hindi questions were used** for every number above (`data/subset/`, built by `src/data/loader.py`), not the full dataset.
+- **Real Sarvam speech-to-text works but was never tested on real human speech** — see above.
+- **The LLM-judge safety net is measured but not turned on** in the live pipeline — turning it on would add a real few-second delay to every question, a tradeoff worth making deliberately.
+- **The embedding model wasn't picked after comparing alternatives** — it was chosen for being small and fast, not benchmarked against bigger/slower options.
+- **Only Hindi was tested end to end**, though the dataset covers 14 languages and the code should work with others.
+- **Built and tested on Python 3.14**, not 3.11 as originally planned — nothing in the code actually needs 3.11 specifically. CI still uses 3.11.
+- **The unsafe-content check is a simple keyword list**, not a trained model — it will miss things phrased in ways not on the list.
+- **API rate limits and behavior under heavy load weren't tested** — just individual calls.
 
 ## Repository layout
 
